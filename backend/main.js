@@ -7,6 +7,7 @@ const AWS = require('aws-sdk')
 const multer = require('multer')
 const fs = require('fs')
 const { errorMonitor } = require('stream')
+const { ESPIPE } = require('constants')
 require('dotenv').config()
 
 const PORT = parseInt(process.argv[2]) || parseInt(process.env.PORT) || 3000
@@ -14,6 +15,7 @@ const PORT = parseInt(process.argv[2]) || parseInt(process.env.PORT) || 3000
 const app = express()
 app.use(express.urlencoded({extended: true}))
 app.use(morgan('combined'))
+app.use(express.static(__dirname + '/frontend'))
 
 //#AWS S3
 const AWS_S3_HOSTNAME = process.env.AWS_S3_HOSTNAME
