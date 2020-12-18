@@ -11,6 +11,7 @@ import { LoginComponent } from './components/login.component';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { AuthenSvc } from './app.authen';
 import { HttpClientModule } from '@angular/common/http'
+import { ShareService } from './share.service';
 
 const ROUTES: Routes = [
 	{ path: '', component: LoginComponent },
@@ -31,7 +32,7 @@ const ROUTES: Routes = [
     WebcamModule,
     HttpClientModule
   ],
-  providers: [ CameraService, AuthenSvc ],
+  providers: [ CameraService, AuthenSvc, ShareService ],
   bootstrap: [AppComponent]
 })
 export class AppModule { }

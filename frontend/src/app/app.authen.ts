@@ -5,6 +5,8 @@ import { LoginData } from "./models";
 @Injectable()
 export class AuthenSvc{
 
+    credentials: LoginData //to store correct user_id and pw
+    
     constructor(private http:HttpClient){}
 
 

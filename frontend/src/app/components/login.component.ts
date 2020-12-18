@@ -32,6 +32,7 @@ export class LoginComponent implements OnInit {
     this.authensvc.verifyLogin(logindata)
       .then(result => {
         console.log("username and pw is correct")
+        this.authensvc.credentials = logindata
         this.router.navigate(['/main'])
       })
       .catch(e => {
@@ -39,6 +40,5 @@ export class LoginComponent implements OnInit {
         this.errorMessage = 'username or password is invalid; please try again'
       })
     
-
   }
 }

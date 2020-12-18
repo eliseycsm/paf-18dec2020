@@ -2,20 +2,33 @@ const morgan = require('morgan')
 const express = require('express')
 const sha1 = require('sha1')
 const mysql = require('mysql2/promise')
-const {MongoClient, ObjectId} = require('mongodb')
+const {MongoClient} = require('mongodb')
 const AWS = require('aws-sdk')
 const multer = require('multer')
 const fs = require('fs')
+const { errorMonitor } = require('stream')
 require('dotenv').config()
 
 const PORT = parseInt(process.argv[2]) || parseInt(process.env.PORT) || 3000
 
 const app = express()
 app.use(express.urlencoded({extended: true}))
-app.use(express.json())
-
 app.use(morgan('combined'))
 
+//#AWS S3
+const AWS_S3_HOSTNAME = process.env.AWS_S3_HOSTNAME
+const AWS_S3_ACCESS_KEY = process.env.AWS_S3_ACCESS_KEY
+const AWS_S3_SECRET_ACCESS_KEY = process.env.AWS_S3_SECRET_ACCESS_KEY
+const AWS_S3_BUCKETNAME = process.env.AWS_S3_BUCKETNAME
+//set up S3 Endpoint object
+const spaceEndpoint = new AWS.Endpoint(AWS_S3_HOSTNAME) //pass hostname here
+
+//create s3 bucket
+const s3 = new AWS.S3({
+    endpoint: spaceEndpoint,
+    accessKeyId: AWS_S3_ACCESS_KEY,
+    secretAccessKey: AWS_S3_SECRET_ACCESS_KEY
+})
 
 //#mysql
 const pool = mysql.createPool({
@@ -54,17 +67,23 @@ const mkQuery = (sqlStmt, pool) => {
     })
 }
 
-
 const checkLoginDataWithSQL = mkQuery(SQL_GET_LOGIN_DETAILS, pool)
 
-//POST /checklogin
-app.post('/checklogin', async(req, resp) => {
+//#mongo
+const MONGO_URL = 'mongodb://localhost:27017'
+const client = new MongoClient(MONGO_URL, { useNewUrlParser: true, useUnifiedTopology: true });
+const MONGO_DATABASE = process.env.MONGO_DATABASE
+const MONGO_COLLECTION = process.env.MONGO_COLLECTION
+
+
+//POST /checklogin #mysql
+app.post('/checklogin', express.json(), async(req, resp) => {
 	const data = req.body
 	const user_id = data.user_id
 	const password = sha1(data.password)
-	console.log("rcvd from ng: ", data)
+	//console.log("rcvd from ng: ", data)
 	const result = await checkLoginDataWithSQL([user_id, password])
-	console.log("result from sql: ", result)
+	//console.log("result from sql: ", result)
 
 	resp.type('application/json')
 	if(result.length <= 0){
@@ -73,11 +92,93 @@ app.post('/checklogin', async(req, resp) => {
 		resp.status(200).end()
 
 	}
-
 })
 
+//#multer
+const upload = multer({dest: process.env.TMP_DIR || './temp'})
 
-startSQL(pool).then(
+
+//POST sharecontent #aws
+app.post('/sharecontent', upload.single('image-file'), async(req, resp) => {
+	const contentText = req.body
+	const contentFile = req.file
+	//console.log("user_id and pw:  ", contentText.user_id, contentText.password)
+	const user_id = contentText.user_id
+	const password = sha1(contentText.password)
+	//console.log("pw: ", password)
+	const result = await checkLoginDataWithSQL([user_id, password])
+
+	resp.type('application/json')
+	if(result.length <= 0){
+		resp.status(401).end()
+		return
+	}
+
+	//INSERT IMAGE INTO S3
+
+	const uploadToS3 = new Promise((resolve, reject) => {
+		fs.readFile(req.file.path, (err, buff) => {
+			console.log("filepath: ", req.file.path)
+			const params = {
+				Bucket: AWS_S3_BUCKETNAME,
+				Key: req.file.filename,
+				Body: buff,
+				ACL: 'public-read',
+				ContentType: req.file.mimetype,
+				ContentLength: req.file.size,
+				Metadata: {
+					originalName: req.file.originalname,
+				}
+			}
+			s3.putObject(params, (error, result) => {
+				if(result) resolve("s3 upload ok ", result)
+				else reject("upload to s3 failed ", err)
+			})
+			
+		})
+	})
+	uploadToS3
+		.then(() =>{
+		//return objectid
+		const insertedLogId = insertIntoMongo(contentText, contentFile.filename)
+		return insertedLogId
+		}).then(result => {
+
+			console.log("result from Mongo", result)
+			resp.status(200).json({insertedId: result})
+			resp.on('finish', () => {
+				fs.unlink(req.file.path, () => {})
+				console.info('>>> response ended')
+       		})
+		}).catch( err => {
+			console.error("error with uploading sequence: ", err)
+			resp.status(500).json(err)
+		})
+})
+
+const mkShare = (data, fileKey) => {
+	return {
+		title: data.title, 
+		comments: data.comments,
+		reference: fileKey,
+		ts: new Date()
+	}
+}
+
+async function insertIntoMongo(data, fileKey){
+	//console.log("can proceed to mongo")
+	//add title, comments, filekey, timestamp to mongo
+
+	const result = await client.db(MONGO_DATABASE).collection(MONGO_COLLECTION).insertOne(mkShare(data, fileKey))
+	console.log("result from mongo insert: ", result.ops)	
+	return result.ops[0]['_id']	
+}
+
+
+
+const getMongoConnection = client.connect()
+
+Promise.all([startSQL(pool), getMongoConnection]).then(
 	app.listen(PORT, () => {
 		console.info(`Application started on port ${PORT} at ${new Date()}`)
 	})
